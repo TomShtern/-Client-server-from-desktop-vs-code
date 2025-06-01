@@ -1,35 +1,50 @@
 # C++ File Backup Client
 
-This is a C++ client for uploading files to the backup server.
+⚠️ **IMPORTANT**: This directory contains TWO different client implementations:
 
-## Requirements
+## Current Implementation (HTTP-based)
+- **File**: `client.cpp`
+- **Protocol**: HTTP with libcurl
+- **Status**: ✅ Working with current Python servers
+- **Build**: Use `build_http_client.bat` (no CMake needed)
 
+## Specification Requirements (Binary TCP)
+- **Protocol**: Binary TCP with Crypto++ and Boost.Asio
+- **Status**: ❌ Not implemented yet
+- **Details**: See `../Spesifications.md` for complete requirements
+
+---
+
+## Building the HTTP Client (Current)
+
+### Quick Build (No CMake)
+```bash
+# Windows - just run the build script
+build_http_client.bat
+```
+
+### Requirements for HTTP Client
 - C++ compiler with C++17 support
 - libcurl development files
 
-## Building the Client
+### Manual Compilation
 
-### Using CMake (Recommended)
+On Windows with MinGW:
+```bash
+g++ -std=c++17 client.cpp -o http_client.exe -lcurl
+```
 
+On Linux/macOS:
+```bash
+g++ -std=c++17 client.cpp -o http_client -lcurl
+```
+
+### Using CMake (Optional)
 ```bash
 mkdir build
 cd build
 cmake ..
 cmake --build .
-```
-
-### Manual Compilation
-
-On Windows with MinGW:
-
-```bash
-g++ -std=c++17 client.cpp -o client.exe -lcurl
-```
-
-On Linux/macOS:
-
-```bash
-g++ -std=c++17 client.cpp -o client -lcurl
 ```
 
 ## Installing libcurl
