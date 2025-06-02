@@ -39,7 +39,7 @@ char* RSAPublicWrapper::getPublicKey(char* keyout, unsigned int length) const
 std::string RSAPublicWrapper::encrypt(const std::string& plain)
 {
 	std::string cipher;
-	CryptoPP::RSAES_OAEP_SHA_Encryptor e(_publicKey);
+	CryptoPP::RSAES_OAEP_SHA256_Encryptor e(_publicKey);
 	CryptoPP::StringSource ss(plain, true, new CryptoPP::PK_EncryptorFilter(_rng, e, new CryptoPP::StringSink(cipher)));
 	return cipher;
 }
@@ -47,7 +47,7 @@ std::string RSAPublicWrapper::encrypt(const std::string& plain)
 std::string RSAPublicWrapper::encrypt(const char* plain, unsigned int length)
 {
 	std::string cipher;
-	CryptoPP::RSAES_OAEP_SHA_Encryptor e(_publicKey);
+	CryptoPP::RSAES_OAEP_SHA256_Encryptor e(_publicKey);
 	CryptoPP::StringSource ss(reinterpret_cast<const CryptoPP::byte*>(plain), length, true, new CryptoPP::PK_EncryptorFilter(_rng, e, new CryptoPP::StringSink(cipher)));
 	return cipher;
 }
@@ -108,7 +108,7 @@ char* RSAPrivateWrapper::getPublicKey(char* keyout, unsigned int length) const
 std::string RSAPrivateWrapper::decrypt(const std::string& cipher)
 {
 	std::string recovered;
-	CryptoPP::RSAES_OAEP_SHA_Decryptor d(_privateKey);
+	CryptoPP::RSAES_OAEP_SHA256_Decryptor d(_privateKey);
 	CryptoPP::StringSource ss(cipher, true, new CryptoPP::PK_DecryptorFilter(_rng, d, new CryptoPP::StringSink(recovered)));
 	return recovered;
 }
@@ -116,7 +116,7 @@ std::string RSAPrivateWrapper::decrypt(const std::string& cipher)
 std::string RSAPrivateWrapper::decrypt(const char* cipher, unsigned int length)
 {
 	std::string recovered;
-	CryptoPP::RSAES_OAEP_SHA_Decryptor d(_privateKey);
+	CryptoPP::RSAES_OAEP_SHA256_Decryptor d(_privateKey);
 	CryptoPP::StringSource ss(reinterpret_cast<const CryptoPP::byte*>(cipher), length, true, new CryptoPP::PK_DecryptorFilter(_rng, d, new CryptoPP::StringSink(recovered)));
 	return recovered;
 }

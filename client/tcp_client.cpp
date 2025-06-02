@@ -76,11 +76,7 @@ bool TCPClient::run() {
             }
         }
 
-        // Receive AES session key
-        if (!receiveAESKey()) {
-            std::cerr << "❌ Failed to receive AES key" << std::endl;
-            return false;
-        }
+        // AES key is now received and decrypted in sendPublicKey()
 
         // Send file
         if (!sendFile()) {
@@ -180,6 +176,16 @@ bool TCPClient::loadClientCredentials() {
         client_id_[i] = static_cast<uint8_t>(std::stoi(hex_byte, nullptr, 16));
     }
 
+    // Initialize RSA private key wrapper from stored Base64 key
+    try {
+        std::string private_key_binary = Base64Wrapper::decode(credentials_.private_key_base64);
+        rsa_private_ = std::make_unique<RSAPrivateWrapper>(private_key_binary);
+        std::cout << "✓ RSA private key loaded from credentials" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "❌ Failed to load RSA private key: " << e.what() << std::endl;
+        return false;
+    }
+
     credentials_.valid = true;
     return true;
 }
@@ -268,23 +274,31 @@ bool TCPClient::sendRequest(uint16_t code, const void* payload, uint32_t payload
 
 bool TCPClient::receiveResponse(uint16_t& code, std::vector<uint8_t>& payload) {
     try {
+        std::cout << "🔍 Debug: Starting receiveResponse..." << std::endl;
+
         ResponseHeader header;
+        std::cout << "🔍 Debug: Reading response header (" << sizeof(header) << " bytes)..." << std::endl;
         boost::asio::read(*socket_, boost::asio::buffer(&header, sizeof(header)));
-        
+        std::cout << "🔍 Debug: Header received" << std::endl;
+
         if (header.version != PROTOCOL_VERSION) {
-            std::cerr << "❌ Protocol version mismatch" << std::endl;
+            std::cerr << "❌ Protocol version mismatch: got " << header.version << ", expected " << PROTOCOL_VERSION << std::endl;
             return false;
         }
 
         code = header.code;
-        
+        std::cout << "🔍 Debug: Response code: " << code << ", payload size: " << header.payload_size << std::endl;
+
         if (header.payload_size > 0) {
             payload.resize(header.payload_size);
+            std::cout << "🔍 Debug: Reading payload (" << header.payload_size << " bytes)..." << std::endl;
             boost::asio::read(*socket_, boost::asio::buffer(payload.data(), header.payload_size));
+            std::cout << "🔍 Debug: Payload received" << std::endl;
         } else {
             payload.clear();
         }
 
+        std::cout << "🔍 Debug: receiveResponse completed successfully" << std::endl;
         return true;
     } catch (const std::exception& e) {
         std::cerr << "❌ Failed to receive response: " << e.what() << std::endl;
@@ -329,9 +343,8 @@ bool TCPClient::registerWithServer() {
         rsa_private_ = std::make_unique<RSAPrivateWrapper>();
 
         // Get private key in Base64 format for storage
-        // Note: This would need to be implemented in RSAWrapper
-        // For now, we'll use a placeholder
-        credentials_.private_key_base64 = "RSA_PRIVATE_KEY_BASE64_PLACEHOLDER";
+        std::string private_key_binary = rsa_private_->getPrivateKey();
+        credentials_.private_key_base64 = Base64Wrapper::encode(private_key_binary);
 
         // Save credentials
         if (!saveClientCredentials(credentials_.uuid, credentials_.private_key_base64)) {
@@ -370,6 +383,46 @@ bool TCPClient::reconnectToServer() {
 
     if (response_code == RESP_RECONNECT_APPROVED) {
         std::cout << "✅ Reconnection approved" << std::endl;
+
+        // Extract AES key from response payload (UUID + encrypted AES key)
+        if (response_payload.size() < CLIENT_ID_SIZE) {
+            std::cerr << "❌ Invalid AES key response size" << std::endl;
+            return false;
+        }
+
+        // Extract encrypted AES key (skip UUID)
+        std::vector<uint8_t> encrypted_aes_key(
+            response_payload.begin() + CLIENT_ID_SIZE,
+            response_payload.end()
+        );
+
+        std::cout << "🔍 Debug: Encrypted AES key size: " << encrypted_aes_key.size() << " bytes" << std::endl;
+
+        // Decrypt AES key using RSA private key
+        try {
+            std::string encrypted_key_str(encrypted_aes_key.begin(), encrypted_aes_key.end());
+            std::cout << "🔍 Debug: Starting RSA decryption..." << std::endl;
+
+            std::string decrypted_key = rsa_private_->decrypt(encrypted_key_str);
+            std::cout << "🔍 Debug: RSA decryption completed" << std::endl;
+
+            if (decrypted_key.length() != AES_KEY_SIZE) {
+                std::cerr << "❌ Decrypted AES key has wrong size: " << decrypted_key.length() << " (expected " << AES_KEY_SIZE << ")" << std::endl;
+                return false;
+            }
+
+            aes_key_.assign(decrypted_key.begin(), decrypted_key.end());
+
+            // Initialize AES wrapper with received key
+            aes_ = std::make_unique<AESWrapper>(aes_key_.data(), AES_KEY_SIZE);
+
+            std::cout << "✅ AES session key received and decrypted" << std::endl;
+
+        } catch (const std::exception& e) {
+            std::cerr << "❌ Failed to decrypt AES key: " << e.what() << std::endl;
+            return false;
+        }
+
         return true;
     } else if (response_code == RESP_RECONNECT_DENIED) {
         std::cerr << "❌ Reconnection denied - client not found" << std::endl;
@@ -407,6 +460,46 @@ bool TCPClient::sendPublicKey() {
 
     if (response_code == RESP_PUBLIC_KEY_RECEIVED) {
         std::cout << "✅ Public key sent successfully" << std::endl;
+
+        // Extract AES key from response payload (UUID + encrypted AES key)
+        if (response_payload.size() < CLIENT_ID_SIZE) {
+            std::cerr << "❌ Invalid AES key response size" << std::endl;
+            return false;
+        }
+
+        // Extract encrypted AES key (skip UUID)
+        std::vector<uint8_t> encrypted_aes_key(
+            response_payload.begin() + CLIENT_ID_SIZE,
+            response_payload.end()
+        );
+
+        std::cout << "🔍 Debug: Encrypted AES key size: " << encrypted_aes_key.size() << " bytes" << std::endl;
+
+        // Decrypt AES key using RSA private key
+        try {
+            std::string encrypted_key_str(encrypted_aes_key.begin(), encrypted_aes_key.end());
+            std::cout << "🔍 Debug: Starting RSA decryption..." << std::endl;
+
+            std::string decrypted_key = rsa_private_->decrypt(encrypted_key_str);
+            std::cout << "🔍 Debug: RSA decryption completed" << std::endl;
+
+            if (decrypted_key.length() != AES_KEY_SIZE) {
+                std::cerr << "❌ Decrypted AES key has wrong size: " << decrypted_key.length() << " (expected " << AES_KEY_SIZE << ")" << std::endl;
+                return false;
+            }
+
+            aes_key_.assign(decrypted_key.begin(), decrypted_key.end());
+
+            // Initialize AES wrapper with received key
+            aes_ = std::make_unique<AESWrapper>(aes_key_.data(), AES_KEY_SIZE);
+
+            std::cout << "✅ AES session key received and decrypted" << std::endl;
+
+        } catch (const std::exception& e) {
+            std::cerr << "❌ Failed to decrypt AES key: " << e.what() << std::endl;
+            return false;
+        }
+
         return true;
     } else {
         std::cerr << "❌ Failed to send public key, response: " << response_code << std::endl;

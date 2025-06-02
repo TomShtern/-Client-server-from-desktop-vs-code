@@ -70,5 +70,17 @@ encryption.key
 # Test files
 test_*.dat
 test_*.bin
+test_*.txt
 large_test_file.*
 tmp/
+tests/unit/*.exe
+tests/integration/*.exe
+tests/fixtures/test_files/*
+
+# Client configuration files
+me.info
+transfer.info
+port.info
+
+# Server storage
+server_files/

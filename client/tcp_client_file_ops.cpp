@@ -38,11 +38,16 @@ bool TCPClient::receiveAESKey() {
         }
 
         try {
+            std::cout << "🔍 Debug: Encrypted AES key size: " << encrypted_aes_key.size() << " bytes" << std::endl;
+
             std::string encrypted_key_str(encrypted_aes_key.begin(), encrypted_aes_key.end());
+            std::cout << "🔍 Debug: Starting RSA decryption..." << std::endl;
+
             std::string decrypted_key = rsa_private_->decrypt(encrypted_key_str);
-            
+            std::cout << "🔍 Debug: RSA decryption completed" << std::endl;
+
             if (decrypted_key.length() != AES_KEY_SIZE) {
-                std::cerr << "❌ Decrypted AES key has wrong size: " << decrypted_key.length() << std::endl;
+                std::cerr << "❌ Decrypted AES key has wrong size: " << decrypted_key.length() << " (expected " << AES_KEY_SIZE << ")" << std::endl;
                 return false;
             }
 
@@ -97,30 +102,36 @@ bool TCPClient::sendFile() {
     // Prepare file payload
     FilePayload payload;
     payload.content_size = static_cast<uint32_t>(encrypted_file.length());
-    
+    payload.orig_file_size = static_cast<uint32_t>(file_data_.size());
+    payload.packet_number = 1;  // Single packet transfer as per specification
+    payload.total_packets = 1;  // Single packet transfer as per specification
+
     // Extract filename from path
     std::filesystem::path file_path(server_config_.file_path);
     std::string filename = file_path.filename().string();
     padString(payload.file_name, filename, FILENAME_SIZE);
+
+    // Combine payload header and encrypted file content into one buffer
+    std::vector<uint8_t> combined_payload;
+    combined_payload.resize(sizeof(payload) + encrypted_file.length());
+
+    // Copy header
+    std::memcpy(combined_payload.data(), &payload, sizeof(payload));
+
+    // Copy encrypted file content
+    std::memcpy(combined_payload.data() + sizeof(payload), encrypted_file.data(), encrypted_file.length());
 
     // Send file transfer request
     retry_count_ = 0;
     while (retry_count_ < MAX_RETRIES) {
         std::cout << "📤 Sending file (attempt " << (retry_count_ + 1) << "/" << MAX_RETRIES << ")..." << std::endl;
 
-        // Send payload header
-        if (!sendRequest(REQ_SEND_FILE, &payload, sizeof(payload))) {
+        // Send combined payload (header + encrypted content)
+        if (!sendRequest(REQ_SEND_FILE, combined_payload.data(), combined_payload.size())) {
             return false;
         }
 
-        // Send encrypted file content
-        try {
-            boost::asio::write(*socket_, boost::asio::buffer(encrypted_file.data(), encrypted_file.length()));
-            std::cout << "✓ File content sent" << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "❌ Failed to send file content: " << e.what() << std::endl;
-            return false;
-        }
+        std::cout << "✓ File content sent (" << combined_payload.size() << " bytes total)" << std::endl;
 
         // Receive server response with CRC
         uint16_t response_code;
@@ -131,10 +142,14 @@ bool TCPClient::sendFile() {
         }
 
         if (response_code == RESP_FILE_RECEIVED) {
-            if (response_payload.size() >= sizeof(uint32_t)) {
+            // Response payload: client_id (16) + content_size (4) + filename (255) + crc (4)
+            const size_t expected_size = CLIENT_ID_SIZE + sizeof(uint32_t) + FILENAME_SIZE + sizeof(uint32_t);
+            if (response_payload.size() >= expected_size) {
+                // Extract CRC from the end of the payload
                 uint32_t server_crc;
-                std::memcpy(&server_crc, response_payload.data(), sizeof(uint32_t));
-                
+                size_t crc_offset = response_payload.size() - sizeof(uint32_t);
+                std::memcpy(&server_crc, response_payload.data() + crc_offset, sizeof(uint32_t));
+
                 std::cout << "✓ Server CRC received: 0x" << std::hex << server_crc << std::dec << std::endl;
                 
                 if (handleCRCValidation(server_crc)) {
@@ -168,25 +183,10 @@ bool TCPClient::sendFile() {
 bool TCPClient::handleCRCValidation(uint32_t server_crc) {
     if (server_crc == file_crc_) {
         std::cout << "✅ CRC validation successful!" << std::endl;
-        
-        // Send CRC valid confirmation
-        if (sendRequest(REQ_CRC_VALID, nullptr, 0)) {
-            // Wait for final acknowledgment
-            uint16_t response_code;
-            std::vector<uint8_t> response_payload;
-            
-            if (receiveResponse(response_code, response_payload)) {
-                if (response_code == RESP_GENERIC_ACK) {
-                    std::cout << "✅ File transfer completed successfully!" << std::endl;
-                    return true;
-                }
-            }
-        }
-        
-        std::cerr << "❌ Failed to send CRC validation" << std::endl;
-        return false;
+        std::cout << "✅ File transfer completed successfully!" << std::endl;
+        return true;
     } else {
-        std::cout << "❌ CRC mismatch - Client: 0x" << std::hex << file_crc_ 
+        std::cout << "❌ CRC mismatch - Client: 0x" << std::hex << file_crc_
                   << ", Server: 0x" << server_crc << std::dec << std::endl;
         return false;
     }

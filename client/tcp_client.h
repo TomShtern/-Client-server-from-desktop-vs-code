@@ -69,6 +69,9 @@ struct ReconnectionPayload {
 
 struct FilePayload {
     uint32_t content_size;
+    uint32_t orig_file_size;
+    uint16_t packet_number;
+    uint16_t total_packets;
     char file_name[FILENAME_SIZE];
     // Followed by encrypted file content
 };
