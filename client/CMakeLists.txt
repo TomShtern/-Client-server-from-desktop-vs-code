@@ -1,35 +1,52 @@
-# CMakeLists.txt for C++ backup client
-# NOTE: This CMake is for the HTTP-based client (current implementation)
-# The specifications require a different binary TCP client with Crypto++ and Boost.Asio
+cmake_minimum_required(VERSION 3.20)
+project(SecureBackupClient)
 
-cmake_minimum_required(VERSION 3.10)
-project(backup_client)
-
+# Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Option to build HTTP client (current) or TCP client (specifications)
-option(BUILD_HTTP_CLIENT "Build HTTP-based client (current implementation)" ON)
-option(BUILD_TCP_CLIENT "Build TCP-based client (per specifications)" OFF)
+# Find required packages
+find_package(cryptopp CONFIG REQUIRED)
+find_package(Boost REQUIRED)
 
-if(BUILD_HTTP_CLIENT)
-    # HTTP Client (current implementation)
-    find_package(CURL REQUIRED)
-    include_directories(${CURL_INCLUDE_DIRS})
+# Add wrapper test executable
+add_executable(test_wrappers
+    AESWrapper.cpp
+    RSAWrapper.cpp
+    Base64Wrapper.cpp
+    cksum.cpp
+    test_wrappers.cpp
+)
 
-    add_executable(http_client client.cpp)
-    target_link_libraries(http_client ${CURL_LIBRARIES})
+# Add TCP client executable
+add_executable(tcp_client
+    AESWrapper.cpp
+    RSAWrapper.cpp
+    Base64Wrapper.cpp
+    cksum.cpp
+    tcp_client.cpp
+    tcp_client_file_ops.cpp
+    main.cpp
+)
 
-    install(TARGETS http_client DESTINATION bin)
+# Link libraries
+target_link_libraries(test_wrappers PRIVATE cryptopp::cryptopp)
+target_link_libraries(tcp_client PRIVATE cryptopp::cryptopp)
+
+# Include Boost headers (header-only for what we need)
+target_include_directories(test_wrappers PRIVATE ${Boost_INCLUDE_DIRS})
+target_include_directories(tcp_client PRIVATE ${Boost_INCLUDE_DIRS})
+
+# Windows-specific libraries
+if(WIN32)
+    target_link_libraries(test_wrappers PRIVATE ws2_32)
+    target_link_libraries(tcp_client PRIVATE ws2_32)
 endif()
 
-if(BUILD_TCP_CLIENT)
-    # TCP Client (per specifications) - requires Crypto++ and Boost
-    # find_package(cryptopp REQUIRED)
-    # find_package(Boost REQUIRED COMPONENTS system)
-
-    # add_executable(tcp_client tcp_client.cpp)
-    # target_link_libraries(tcp_client cryptopp Boost::system)
-
-    message(STATUS "TCP client build not implemented yet - requires Crypto++ and Boost.Asio")
-endif()
+# Set output directory
+set_target_properties(test_wrappers PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_target_properties(tcp_client PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
